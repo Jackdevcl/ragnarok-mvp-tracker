@@ -2,6 +2,8 @@ import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 
+import { environment } from '../../environments/environment';
+
 export interface Mvp {
   id: number;
   name: string;
@@ -13,7 +15,7 @@ export interface Mvp {
   providedIn: 'root'
 })
 export class MvpService {
-  private apiUrl = 'http://localhost:3000/api/mvps';
+  private apiUrl = `${environment.apiUrl}/mvps`;
 
   constructor(private http: HttpClient) {}
 
@@ -30,10 +32,10 @@ export class MvpService {
   }
 
   login(username: string, password: string): Observable<{ token: string }> {
-    return this.http.post<{ token: string }>('http://localhost:3000/api/auth/login', { username, password });
+    return this.http.post<{ token: string }>(`${environment.apiUrl}/auth/login`, { username, password });
   }
 
   registerUser(username: string, password: string): Observable<any> {
-    return this.http.post<any>('http://localhost:3000/api/auth/register', { username, password });
+    return this.http.post<any>(`${environment.apiUrl}/auth/register`, { username, password });
   }
 }
