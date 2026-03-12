@@ -1,0 +1,119 @@
+@if (!isAuthenticated()) {
+  <div class="login-wrapper" [class.fade-out]="isFadingOut()">
+    <div class="login-card" [class.shake-animation]="isShaking()">
+      <img src="/ragnarok_online.jpg" alt="Ragnarok Online" class="ro-login-logo">
+      <h1 class="login-title">MVP TRACKER</h1>
+
+      @if (!isRegisterMode()) {
+        <p class="login-subtitle">Inicia sesión para poder anotar tus MVPs y sincronizar con tu círculo</p>
+        
+        <div class="form-group">
+          <label>Usuario</label>
+          <input type="text" #loginUserInput class="login-input" placeholder="Ingresa tu usuario">
+        </div>
+        
+        <div class="form-group">
+          <label>Contraseña</label>
+          <input type="password" #loginPassInput class="login-input" placeholder="••••••••" (keyup.enter)="login(loginUserInput.value, loginPassInput.value)">
+        </div>
+
+        @if (loginError()) {
+          <p class="error-msg">{{ loginError() }}</p>
+        }
+
+        <button class="btn btn-login" (click)="login(loginUserInput.value, loginPassInput.value)">INGRESAR</button>
+        <p class="toggle-text">¿No tienes cuenta? <a class="toggle-link" (click)="toggleMode()">Regístrate aquí</a></p>
+        
+      } @else {
+        
+        <p class="login-subtitle">Crea una nueva cuenta para colaborar con nosotros</p>
+        
+        <div class="form-group">
+          <label>Nuevo Usuario</label>
+          <input type="text" #regUserInput class="login-input" placeholder="Ingresa tu usuario">
+        </div>
+        
+        <div class="form-group">
+          <label>Contraseña</label>
+          <input type="password" #regPassInput class="login-input" placeholder="••••••••" (keyup.enter)="register(regUserInput.value, regPassInput.value)">
+        </div>
+
+        @if (registerError()) {
+          <p class="error-msg">{{ registerError() }}</p>
+        }
+        @if (registerSuccess()) {
+          <p class="success-msg">¡Cuenta creada! Redirigiendo al Login...</p>
+        }
+
+        <button class="btn btn-login" (click)="register(regUserInput.value, regPassInput.value)">REGISTRARSE</button>
+        <p class="toggle-text">¿Ya tienes una cuenta? <a class="toggle-link" (click)="toggleMode()">Inicia sesión</a></p>
+        
+      }
+    </div>
+  </div>
+} @else {
+  <div class="tracker-wrapper">
+    
+    <div class="header">
+      <div class="title-container">
+        <img src="/mvp.png" alt="MVP Logo" class="header-logo">
+        <h1>MVP Tracker</h1>
+      </div>
+      <div class="search-container">
+        <span class="search-icon">🔍</span>
+        <input type="text" class="search-input" placeholder="Buscar MVP..." (keyup)="onSearch($event)">
+      </div>
+      <div class="server-time-controls">
+        <div class="server-clock">🕛 Servidor: {{ formattedServerTime() }}</div>
+        <div class="offset-controls">
+          <label>Extra (hrs): </label>
+          <button class="btn-offset" (click)="adjustOffset(-1)">-</button>
+          <input type="number" class="offset-input" [value]="offsetHours()" (change)="onOffsetChange($event)">
+          <button class="btn-offset" (click)="adjustOffset(1)">+</button>
+        </div>
+        <button class="btn btn-logout" (click)="logout()" title="Cerrar sesión">Salir</button>
+      </div>
+    </div>
+    
+    <div class="grid-container">
+      @for (mvp of filteredMvps(); track mvp.id) {
+        <div class="mvp-card" [ngClass]="mvp.status.toLowerCase()">
+          <button class="btn-reset" (click)="resetMvp(mvp.id)" title="Resetear a WAIT_DATA">&times;</button>
+          <img [src]="mvp.imageUrl" [alt]="mvp.name" class="img-header">
+          
+          <div class="card-content">
+            <h2 class="mvp-name">{{ mvp.name }}</h2>
+            <div class="status-indicator">{{ mvp.status }}</div>
+
+            <div class="clock-panel" [ngClass]="mvp.status.toLowerCase()">
+              <span *ngIf="mvp.status === 'DELAY'" class="delay-label">DELAY:</span>
+              <span class="clock-time">{{ mvp.displayTime }}</span>
+            </div>
+
+            <div class="actions">
+              <button class="btn btn-killed" (click)="killNow(mvp.id)">KILLED NOW</button>
+              
+              <div class="tomb-row">
+                <input type="time" class="time-input" #tombInput>
+                <button class="btn btn-tomb" (click)="registerTomb(mvp.id, tombInput.value); tombInput.value=''">TUMBA</button>
+              </div>
+
+              <div class="mirror-row">
+                <input type="time" class="time-input" #mirrorInput>
+                <button class="btn btn-mirror" (click)="registerMirror(mvp.id, mirrorInput.value); mirrorInput.value=''">MIRROR</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      } @empty {
+        <p class="empty-state">Loading MVPs...</p>
+      }
+    </div>
+
+  </div>
+}
+
+<footer class="ro-footer">
+  <p class="footer-title">Creado por Jack</p>
+  <p class="footer-subtitle">© 2026 - Rune Midgard MVP Tracker</p>
+</footer>
