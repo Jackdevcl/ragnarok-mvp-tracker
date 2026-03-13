@@ -8,6 +8,7 @@ interface MvpView extends Mvp {
   status: MvpStatus;
   displayTime: string;
   imageUrl: string;
+  remainingMs: number;
 }
 
 @Component({
@@ -20,26 +21,56 @@ interface MvpView extends Mvp {
 export class App implements OnInit, OnDestroy {
   protected readonly title = signal('MVP Tracker');
   isAuthenticated = signal<boolean>(false);
+  currentUser = signal<string>('Cazador');
   isRegisterMode = signal<boolean>(false);
   isFadingOut = signal<boolean>(false);
   isShaking = signal<boolean>(false);
+  isLightMode = signal<boolean>(false);
   loginError = signal<string>('');
   registerError = signal<string>('');
   registerSuccess = signal<boolean>(false);
-  
+
   mvps = signal<MvpView[]>([]);
   searchTerm = signal('');
+  notifiedMvps = new Set<number>();
+  activeAlerts = signal<any[]>([]);
+  alarmAudio = new Audio('/alert.mp3');
+
+  showcaseImages = ['/dash_dark.png', '/dash_light.png'];
+  currentShowcaseIndex = signal<number>(0);
 
   filteredMvps = computed(() => {
     const term = this.searchTerm().toLowerCase();
-    return this.mvps().filter(m => m.name.toLowerCase().includes(term));
+    const filtered = this.mvps().filter(m => m.name.toLowerCase().includes(term));
+
+    return filtered.sort((a, b) => {
+      const getStatusWeight = (status: MvpStatus) => {
+        switch (status) {
+          case 'SPAWNED': return 1;
+          case 'DELAY': return 2;
+          case 'WAITING': return 3;
+          case 'WAIT_DATA': return 4;
+          default: return 5;
+        }
+      };
+
+      const weightA = getStatusWeight(a.status);
+      const weightB = getStatusWeight(b.status);
+
+      if (weightA !== weightB) {
+        return weightA - weightB;
+      }
+
+      // Same status, sort by remaining time (ascending)
+      return a.remainingMs - b.remainingMs;
+    });
   });
 
   offsetHours = signal<number>(0);
   serverTime = signal<Date>(new Date());
-  
+
   formattedServerTime = computed(() => {
-    const formatter = new Intl.DateTimeFormat('es-AR', { 
+    const formatter = new Intl.DateTimeFormat('es-AR', {
       hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
     });
     return formatter.format(this.serverTime());
@@ -47,13 +78,15 @@ export class App implements OnInit, OnDestroy {
 
   intervalId: any;
 
-  constructor(private mvpService: MvpService) {}
+  constructor(private mvpService: MvpService) { }
 
   ngOnInit() {
     this.updateServerTime();
-    
-    if (localStorage.getItem('token')) {
+
+    const token = localStorage.getItem('token');
+    if (token) {
       this.isAuthenticated.set(true);
+      this.extractUsername(token);
       this.loadMvps();
     }
 
@@ -100,11 +133,12 @@ export class App implements OnInit, OnDestroy {
         const currentMvps = this.mvps();
         const updatedMvps = data.map(m => {
           const existing = currentMvps.find(curr => curr.id === m.id);
-          return { 
-            ...m, 
+          return {
+            ...m,
             status: existing ? existing.status : 'WAIT_DATA',
             displayTime: existing ? existing.displayTime : '',
-            imageUrl: `/${m.name.toLowerCase().replace(/\s+/g, '_')}.gif`
+            imageUrl: `/${m.name.toLowerCase().replace(/\s+/g, '_')}.gif`,
+            remainingMs: existing ? existing.remainingMs : Infinity
           } as MvpView;
         });
         this.mvps.set(updatedMvps);
@@ -122,11 +156,22 @@ export class App implements OnInit, OnDestroy {
     });
   }
 
+  scrollToLogin() {
+    const element = document.getElementById('login-section');
+    if (element) {
+      element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }
+
   toggleMode() {
     this.isRegisterMode.update(v => !v);
     this.loginError.set('');
     this.registerError.set('');
     this.registerSuccess.set(false);
+  }
+
+  toggleTheme() {
+    this.isLightMode.update(v => !v);
   }
 
   login(u: string, p: string) {
@@ -138,7 +183,8 @@ export class App implements OnInit, OnDestroy {
     this.mvpService.login(u, p).subscribe({
       next: (res) => {
         localStorage.setItem('token', res.token);
-        
+        this.extractUsername(res.token);
+
         // Efecto Fade Out antes de cargar el tracker
         this.isFadingOut.set(true);
         setTimeout(() => {
@@ -185,9 +231,21 @@ export class App implements OnInit, OnDestroy {
     });
   }
 
+  extractUsername(token: string) {
+    try {
+      const payload = JSON.parse(atob(token.split('.')[1]));
+      if (payload && payload.username) {
+        this.currentUser.set(payload.username);
+      }
+    } catch (e) {
+      console.error('Error decoding token', e);
+    }
+  }
+
   logout() {
     localStorage.removeItem('token');
     this.isAuthenticated.set(false);
+    this.currentUser.set('Cazador');
     this.mvps.set([]);
   }
 
@@ -198,7 +256,8 @@ export class App implements OnInit, OnDestroy {
   resetMvp(id: number) {
     this.mvpService.resetMvp(id).subscribe({
       next: (updatedMvp) => {
-        this.mvps.update(current => 
+        this.notifiedMvps.delete(id);
+        this.mvps.update(current =>
           current.map(m => m.id === id ? { ...m, ...updatedMvp } : m)
         );
         this.updateCountdowns();
@@ -210,7 +269,8 @@ export class App implements OnInit, OnDestroy {
   killNow(id: number) {
     this.mvpService.registerKill(id).subscribe({
       next: (updatedMvp) => {
-        this.mvps.update(current => 
+        this.notifiedMvps.delete(id);
+        this.mvps.update(current =>
           current.map(m => m.id === id ? { ...m, ...updatedMvp } : m)
         );
         this.updateCountdowns();
@@ -221,16 +281,17 @@ export class App implements OnInit, OnDestroy {
 
   registerTomb(id: number, timeString: string) {
     if (!timeString) return;
-    
+
     const today = new Date();
     const [hours, minutes] = timeString.split(':');
     today.setHours(parseInt(hours, 10));
     today.setMinutes(parseInt(minutes, 10));
     today.setSeconds(0);
-    
+
     this.mvpService.registerKill(id, today.toISOString()).subscribe({
       next: (updatedMvp) => {
-        this.mvps.update(current => 
+        this.notifiedMvps.delete(id);
+        this.mvps.update(current =>
           current.map(m => m.id === id ? { ...m, ...updatedMvp } : m)
         );
         this.updateCountdowns();
@@ -241,21 +302,22 @@ export class App implements OnInit, OnDestroy {
 
   registerMirror(id: number, timeString: string) {
     if (!timeString) return;
-    
+
     const today = new Date();
     const [hours, minutes] = timeString.split(':');
     today.setHours(parseInt(hours, 10));
     today.setMinutes(parseInt(minutes, 10));
     today.setSeconds(0);
-    
+
     const mvp = this.mvps().find(m => m.id === id);
     if (!mvp) return;
 
     const simulatedKillTime = new Date(today.getTime() - (mvp.base_time_mins * 60000));
-    
+
     this.mvpService.registerKill(id, simulatedKillTime.toISOString()).subscribe({
       next: (updatedMvp) => {
-        this.mvps.update(current => 
+        this.notifiedMvps.delete(id);
+        this.mvps.update(current =>
           current.map(m => m.id === id ? { ...m, ...updatedMvp } : m)
         );
         this.updateCountdowns();
@@ -272,20 +334,43 @@ export class App implements OnInit, OnDestroy {
     return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
   }
 
+  triggerAlerts(newMvps: any[]) {
+    this.activeAlerts.update(curr => [...curr, ...newMvps]);
+    if (this.alarmAudio.paused) {
+      this.alarmAudio.loop = true;
+      this.alarmAudio.play().catch(e => console.error(e));
+    }
+  }
+
+  stopAlarm() {
+    this.alarmAudio.pause();
+    this.alarmAudio.currentTime = 0;
+    this.activeAlerts.set([]);
+  }
+
+  setCarouselIndex(index: number) {
+    this.currentShowcaseIndex.set(index);
+  }
+
   updateCountdowns() {
-    this.mvps.update(current => 
+    let newAlerts: any[] = [];
+
+    this.mvps.update(current =>
       current.map(mvp => {
         const simulatedNow = new Date().getTime() + (this.offsetHours() * 3600000);
 
         let status: MvpStatus = 'WAIT_DATA';
         let displayTime = '';
+        let remainingMs = Infinity;
 
         if (!mvp.last_kill_time) {
           status = 'WAIT_DATA';
           displayTime = 'WAIT_DATA';
+          remainingMs = Infinity;
         } else {
           const spawnTime = new Date(mvp.last_kill_time).getTime() + (mvp.base_time_mins * 60000);
           const diff = spawnTime - simulatedNow;
+          remainingMs = diff;
 
           if (diff > 0) {
             status = 'WAITING';
@@ -293,23 +378,34 @@ export class App implements OnInit, OnDestroy {
           } else if (diff <= 0 && diff >= -600000) {
             status = 'DELAY';
             const delayRemaining = 600000 + diff;
-            
+
             const totalSec = Math.floor(delayRemaining / 1000);
             const minutes = Math.floor(totalSec / 60);
             const seconds = totalSec % 60;
             displayTime = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+
+            if (!this.notifiedMvps.has(mvp.id)) {
+              this.notifiedMvps.add(mvp.id);
+              newAlerts.push(mvp);
+            }
           } else {
             status = 'SPAWNED';
             displayTime = 'SPAWNED';
+            remainingMs = 0;
           }
         }
 
-        return { 
-          ...mvp, 
+        return {
+          ...mvp,
           status,
-          displayTime
+          displayTime,
+          remainingMs
         };
       })
     );
+
+    if (newAlerts.length > 0) {
+      this.triggerAlerts(newAlerts);
+    }
   }
 }

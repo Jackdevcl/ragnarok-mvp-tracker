@@ -1,13 +1,22 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 
-html, body {
+html,
+body {
   margin: 0;
   padding: 0;
-  height: 100%;
+  min-height: 100vh;
   box-sizing: border-box;
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
   background-color: #0b0e14;
+  background-image: linear-gradient(rgba(0, 0, 0, 0.4), rgba(0, 0, 0, 0.8)), url('/ro-wallper.jpg'); /* Use root relative path for angular public assets */
+  background-size: cover;
+  background-position: center top;
+  background-attachment: fixed;
+  background-repeat: no-repeat;
 }
-*, *::before, *::after {
+
+*,
+*::before,
+*::after {
   box-sizing: inherit;
 }
