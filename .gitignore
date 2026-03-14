@@ -16,3 +16,6 @@ out-tsc/
 
 # Logs
 *.log
+
+# Database Scripts
+*.sql

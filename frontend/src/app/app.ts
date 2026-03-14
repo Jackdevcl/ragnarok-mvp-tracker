@@ -1,6 +1,11 @@
 import { Component, OnInit, OnDestroy, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { MvpService, Mvp } from './services/mvp.service';
+import { TableModule } from 'primeng/table';
+import { CardModule } from 'primeng/card';
+import { ButtonModule } from 'primeng/button';
+import { IconFieldModule } from 'primeng/iconfield';
+import { InputIconModule } from 'primeng/inputicon';
 
 type MvpStatus = 'WAITING' | 'DELAY' | 'SPAWNED' | 'WAIT_DATA';
 
@@ -14,7 +19,14 @@ interface MvpView extends Mvp {
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [CommonModule],
+  imports: [
+    CommonModule,
+    TableModule,
+    CardModule,
+    ButtonModule,
+    IconFieldModule,
+    InputIconModule
+  ],
   templateUrl: './app.html',
   styleUrl: './app.css'
 })
@@ -22,6 +34,12 @@ export class App implements OnInit, OnDestroy {
   protected readonly title = signal('MVP Tracker');
   isAuthenticated = signal<boolean>(false);
   currentUser = signal<string>('Cazador');
+  currentUserRole = signal<string>('user');
+  isAdminView = signal<boolean>(false);
+  adminUserStats = signal<any[]>([]);
+  adminGlobalStats = signal<any>({});
+  adminVisitors = signal<any[]>([]);
+  activeAdminTab = signal<string>('users');
   isRegisterMode = signal<boolean>(false);
   isFadingOut = signal<boolean>(false);
   isShaking = signal<boolean>(false);
@@ -77,11 +95,22 @@ export class App implements OnInit, OnDestroy {
   });
 
   intervalId: any;
+  private adminPollingInterval: any;
+
+  onlineUsersCount = computed(() => {
+    return this.adminUserStats().filter(u => this.isUserOnline(u.last_interaction)).length;
+  });
 
   constructor(private mvpService: MvpService) { }
 
   ngOnInit() {
     this.updateServerTime();
+
+    // Registrar visita silenciosa
+    this.mvpService.registerVisit().subscribe({
+      next: () => {},
+      error: () => {} // Fire and forget
+    });
 
     const token = localStorage.getItem('token');
     if (token) {
@@ -105,6 +134,9 @@ export class App implements OnInit, OnDestroy {
   ngOnDestroy() {
     if (this.intervalId) {
       clearInterval(this.intervalId);
+    }
+    if (this.adminPollingInterval) {
+      clearInterval(this.adminPollingInterval);
     }
   }
 
@@ -236,6 +268,8 @@ export class App implements OnInit, OnDestroy {
       const payload = JSON.parse(atob(token.split('.')[1]));
       if (payload && payload.username) {
         this.currentUser.set(payload.username);
+        this.currentUserRole.set(payload.role || 'user');
+        console.log('Rol detectado en frontend:', this.currentUserRole());
       }
     } catch (e) {
       console.error('Error decoding token', e);
@@ -246,7 +280,62 @@ export class App implements OnInit, OnDestroy {
     localStorage.removeItem('token');
     this.isAuthenticated.set(false);
     this.currentUser.set('Cazador');
+    this.currentUserRole.set('user');
+    this.isAdminView.set(false);
     this.mvps.set([]);
+  }
+
+  toggleAdminView() {
+    this.isAdminView.update(v => !v);
+    if (this.isAdminView()) {
+      this.loadAdminStats();
+      this.adminPollingInterval = setInterval(() => {
+        this.loadAdminStats();
+      }, 5000);
+    } else {
+      if (this.adminPollingInterval) {
+        clearInterval(this.adminPollingInterval);
+      }
+    }
+  }
+
+  loadAdminStats() {
+    this.mvpService.getAdminStats().subscribe({
+      next: (data) => {
+        this.adminGlobalStats.set(data.globalMetrics);
+        this.adminUserStats.set(data.userStats);
+        this.adminVisitors.set(data.visitorsList || []);
+      },
+      error: (err) => {
+        console.error('Error loading admin stats', err);
+      }
+    });
+  }
+
+  setAdminTab(tab: string) {
+    this.activeAdminTab.set(tab);
+  }
+
+  addNewMvp(name: string, baseTime: string, imgUrl: string) {
+    const baseTimeNum = parseInt(baseTime, 10);
+    if (!name || isNaN(baseTimeNum)) return;
+    
+    this.mvpService.addMvp(name, baseTimeNum, imgUrl).subscribe({
+      next: (res) => {
+        console.log('MVP Creado exitosamente', res);
+        // Refresh global MVP list
+        this.loadMvps();
+        // Optional: you can show a success toast here
+      },
+      error: (err) => console.error('Error creando MVP', err)
+    });
+  }
+
+  isUserOnline(lastInteraction: string | Date): boolean {
+    if (!lastInteraction) return false;
+    const last = new Date(lastInteraction).getTime();
+    const now = new Date().getTime();
+    return (now - last) <= 300000;
   }
 
   onSearch(event: any) {

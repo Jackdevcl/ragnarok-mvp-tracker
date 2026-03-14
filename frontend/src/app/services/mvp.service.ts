@@ -38,4 +38,20 @@ export class MvpService {
   registerUser(username: string, password: string): Observable<any> {
     return this.http.post<any>(`${environment.apiUrl}/auth/register`, { username, password });
   }
+
+  registerVisit(): Observable<any> {
+    return this.http.post<any>(`${environment.apiUrl}/analytics/visit`, {});
+  }
+
+  getAdminStats(): Observable<any> {
+    return this.http.get<any>(`${environment.apiUrl}/admin/stats`);
+  }
+
+  addMvp(name: string, baseTime: number, imgUrl: string): Observable<any> {
+    return this.http.post<any>(`${environment.apiUrl}/admin/mvps`, { 
+      name, 
+      base_time_mins: baseTime, 
+      imageUrl: imgUrl 
+    });
+  }
 }

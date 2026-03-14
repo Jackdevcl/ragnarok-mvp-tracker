@@ -33,8 +33,25 @@ pool.connect()
         last_kill_time TIMESTAMP,
         PRIMARY KEY (user_id, mvp_id)
       );
+      
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR(50) DEFAULT 'user';
+      
+      CREATE TABLE IF NOT EXISTS user_connections (
+          id SERIAL PRIMARY KEY,
+          user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+          ip_address VARCHAR(45) NOT NULL,
+          last_connection TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE(user_id, ip_address)
+      );
+      
+      CREATE TABLE IF NOT EXISTS site_visitors (
+          ip_address VARCHAR(45) PRIMARY KEY,
+          visit_count INTEGER DEFAULT 1,
+          first_visit TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+          last_visit TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
     `).then(() => {
-      console.log('Tabla user_mvp_kills verificada/creada.');
+      console.log('Tablas y columnas verificadas/creadas (user_mvp_kills, role, user_connections, site_visitors).');
       client.release();
     });
   })
@@ -74,9 +91,23 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(401).json({ error: 'Usuario o contraseña incorrectos' });
     }
     
-    const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '24h' });
+    const token = jwt.sign({ id: user.id, username: user.username, role: user.role || 'user' }, JWT_SECRET, { expiresIn: '24h' });
+    
+    // TRACK CONNECTION
+    const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
+    try {
+      await pool.query(`
+        INSERT INTO user_connections (user_id, ip_address) 
+        VALUES ($1, $2)
+        ON CONFLICT (user_id, ip_address) 
+        DO UPDATE SET last_connection = CURRENT_TIMESTAMP
+      `, [user.id, clientIp]);
+    } catch(connErr) {
+      console.error('[LOGIN] Error guardando la conexión IP:', connErr);
+    }
+
     console.log(`[LOGIN] Login exitoso para '${username}'. Retornando token.`);
-    res.json({ token });
+    res.json({ token, role: user.role || 'user' });
   } catch (err) {
     console.error('[LOGIN ERROR]', err);
     res.status(500).json({ error: 'Error interno del servidor' });
@@ -199,6 +230,93 @@ app.post('/api/mvps/:id/reset', authenticateToken, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /api/analytics/visit - Telemetry
+app.post('/api/analytics/visit', async (req, res) => {
+  const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
+  try {
+    await pool.query(`
+      INSERT INTO site_visitors (ip_address) 
+      VALUES ($1)
+      ON CONFLICT (ip_address) 
+      DO UPDATE SET 
+        visit_count = site_visitors.visit_count + 1,
+        last_visit = CURRENT_TIMESTAMP
+    `, [clientIp]);
+    res.status(200).send({ success: true });
+  } catch(err) {
+    console.error('[ANALYTICS ERROR]', err);
+    res.status(500).send({ error: 'Error logging visit' });
+  }
+});
+
+// GET /api/admin/stats - Admin Dashboard
+app.get('/api/admin/stats', authenticateToken, async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Acceso denegado. Se requiere rol de administrador.' });
+  }
+  
+  try {
+    const globalRes = await pool.query(`
+      SELECT COUNT(*) as total_unique_ips, COALESCE(SUM(visit_count), 0) as total_visits 
+      FROM site_visitors
+    `);
+    
+    const userStatsRes = await pool.query(`
+      SELECT 
+        u.username, 
+        COALESCE(u.role, 'user') as role, 
+        COUNT(uc.id) as distinct_ips_count,
+        ARRAY_AGG(uc.ip_address) as ip_list,
+        MAX(uc.last_connection) as last_interaction
+      FROM users u
+      LEFT JOIN user_connections uc ON u.id = uc.user_id
+      GROUP BY u.id, u.username, u.role
+      ORDER BY last_interaction DESC NULLS LAST
+    `);
+
+    const visitorsListRes = await pool.query(`
+      SELECT ip_address, visit_count, first_visit, last_visit 
+      FROM site_visitors 
+      ORDER BY last_visit DESC
+    `);
+    
+    res.json({
+      globalMetrics: {
+        totalUniqueIps: parseInt(globalRes.rows[0].total_unique_ips, 10),
+        totalVisits: parseInt(globalRes.rows[0].total_visits, 10)
+      },
+      userStats: userStatsRes.rows,
+      visitorsList: visitorsListRes.rows
+    });
+  } catch (err) {
+    console.error('[ADMIN STATS ERROR]', err);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+// POST /api/admin/mvps - Crear un nuevo MVP
+app.post('/api/admin/mvps', authenticateToken, async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Acceso denegado. Se requiere rol de administrador.' });
+  }
+
+  const { name, base_time_mins, imageUrl } = req.body;
+  if (!name || !base_time_mins) {
+    return res.status(400).json({ error: 'El nombre y el tiempo base son obligatorios' });
+  }
+
+  try {
+    const result = await pool.query(
+      'INSERT INTO mvps (name, base_time_mins) VALUES ($1, $2) RETURNING *',
+      [name, base_time_mins]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error('[ADMIN MVPS ERROR]', err);
+    res.status(500).json({ error: 'Error interno del servidor al crear MVP' });
   }
 });
 

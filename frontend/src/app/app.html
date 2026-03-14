@@ -160,19 +160,28 @@
 
     <div class="header-right">
       <div class="search-container">
-        <span class="search-icon">🔍</span>
+        <i class="pi pi-search search-icon"></i>
         <input type="text" class="search-input" placeholder="Buscar MVP..." (keyup)="onSearch($event)">
       </div>
 
       <div class="dashboard-controls">
+        @if (currentUserRole() === 'admin') {
+          <button class="nav-btn-premium admin-btn" (click)="toggleAdminView()">
+            <i class="pi" [ngClass]="isAdminView() ? 'pi-arrow-left' : 'pi-desktop'"></i>
+            <span>{{ isAdminView() ? 'Volver al Tracker' : 'Panel Admin' }}</span>
+          </button>
+        }
         <button class="btn-theme-toggle" (click)="toggleTheme()" [title]="isLightMode() ? 'Modo Oscuro' : 'Modo Claro'">
-          {{ isLightMode() ? '&#127769;' : '&#9728;&#65039;' }}
+          <i class="pi" [ngClass]="isLightMode() ? 'pi-moon' : 'pi-sun'"></i>
         </button>
-        <button class="btn btn-logout" (click)="logout()" title="Cerrar sesión">Salir</button>
+        <button class="nav-btn-premium logout-btn" (click)="logout()" title="Cerrar sesión">
+          <i class="pi pi-sign-out"></i> <span>Salir</span>
+        </button>
       </div>
     </div>
   </div>
 
+  @if (!isAdminView()) {
   <div class="grid-container">
     @for (mvp of filteredMvps(); track mvp.id) {
     <div class="mvp-card" [ngClass]="mvp.status.toLowerCase()">
@@ -209,6 +218,174 @@
     <p class="empty-state">Loading MVPs...</p>
     }
   </div>
+  } @else {
+  <div class="admin-layout">
+    <aside class="admin-sidebar">
+      <h2 class="sidebar-title">Admin CMS</h2>
+      <nav class="sidebar-nav">
+        <button class="sidebar-btn" [class.active]="activeAdminTab() === 'users'" (click)="setAdminTab('users')">
+          <i class="pi pi-users"></i> Usuarios & Conexiones
+        </button>
+        <button class="sidebar-btn" [class.active]="activeAdminTab() === 'visitors'" (click)="setAdminTab('visitors')">
+          <i class="pi pi-globe"></i> Visitantes Globales
+        </button>
+        <button class="sidebar-btn" [class.active]="activeAdminTab() === 'mvps'" (click)="setAdminTab('mvps')">
+          <i class="pi pi-desktop"></i> Gestión MVPs
+        </button>
+      </nav>
+    </aside>
+
+    <main class="admin-main-content">
+      @switch (activeAdminTab()) {
+        @case ('users') {
+          <div class="admin-dashboard-wrapper">
+            <div class="kpi-cards">
+              <div class="kpi-card premium">
+                <i class="pi pi-bolt kpi-bg-icon"></i>
+                <div class="kpi-info premium-info">
+                  <h3>Cazadores Online</h3>
+                  <p class="kpi-value elite-value">{{ onlineUsersCount() }}</p>
+                </div>
+              </div>
+              <div class="kpi-card premium">
+                <i class="pi pi-chart-line kpi-bg-icon"></i>
+                <div class="kpi-info premium-info">
+                  <h3>Visitas Totales</h3>
+                  <p class="kpi-value elite-value">{{ adminGlobalStats()?.totalVisits || 0 }}</p>
+                </div>
+              </div>
+              <div class="kpi-card premium">
+                <i class="pi pi-users kpi-bg-icon"></i>
+                <div class="kpi-info premium-info">
+                  <h3>Visitantes Únicos (IPs)</h3>
+                  <p class="kpi-value elite-value">{{ adminGlobalStats()?.totalUniqueIps || 0 }}</p>
+                </div>
+              </div>
+            </div>
+            
+            <div class="admin-table-container">
+              <div class="table-responsive">
+                <p-table #dt [value]="adminUserStats()" [paginator]="true" [rows]="10" [globalFilterFields]="['username']" 
+                         styleClass="p-datatable-sm p-datatable-dark custom-ptable">
+                  <ng-template pTemplate="caption">
+                    <div class="table-header-flex">
+                      <h2 class="admin-table-title" style="margin: 0;">Usuarios y Conexiones</h2>
+                      <div class="p-input-icon-left premium-search">
+                        <i class="pi pi-search"></i>
+                        <input pInputText type="text" (input)="dt.filterGlobal($event.target.value, 'contains')" placeholder="Buscar Usuario..." class="search-input p-inputtext-sm" />
+                      </div>
+                    </div>
+                  </ng-template>
+                  <ng-template pTemplate="header">
+                    <tr>
+                      <th>Estado</th>
+                      <th>Usuario</th>
+                      <th>Rol</th>
+                      <th class="text-center">IPs</th>
+                      <th>Lista de IPs</th>
+                      <th>Última Interacción</th>
+                    </tr>
+                  </ng-template>
+                  <ng-template pTemplate="body" let-user>
+                    <tr>
+                      <td class="text-center">
+                        @if (isUserOnline(user.last_interaction)) {
+                          <div class="status-led online" title="Online"></div>
+                        } @else {
+                          <div class="status-led offline" title="Offline"></div>
+                        }
+                      </td>
+                      <td><strong>{{ user.username }}</strong></td>
+                      <td>
+                        @if (user.role === 'admin') {
+                          <span class="p-custom-badge p-badge-admin">ADMIN</span>
+                        } @else {
+                          <span class="p-custom-badge p-badge-user">USER</span>
+                        }
+                      </td>
+                      <td class="text-center">{{ user.distinct_ips_count }}</td>
+                      <td class="ip-list">
+                        @for (ip of user.ip_list; track ip) {
+                          @if (ip) { <span class="ip-badge">{{ ip }}</span> }
+                        }
+                      </td>
+                      <td class="text-xs">{{ user.last_interaction | date:'medium' }}</td>
+                    </tr>
+                  </ng-template>
+                  <ng-template pTemplate="emptymessage">
+                    <tr>
+                      <td colspan="6" class="empty-state text-center p-4">No hay usuarios para mostrar.</td>
+                    </tr>
+                  </ng-template>
+                </p-table>
+              </div>
+            </div>
+          </div>
+        }
+        @case ('visitors') {
+          <div class="admin-dashboard-wrapper">
+            <div class="admin-table-container">
+              <h2 class="admin-table-title">Visitantes Globales</h2>
+              <div class="table-responsive">
+                <table class="admin-table">
+                  <thead>
+                    <tr>
+                      <th>IP</th>
+                      <th class="text-center">Visitas Totales</th>
+                      <th>Primera Visita</th>
+                      <th>Última Visita</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @for (visitor of adminVisitors(); track visitor.ip_address) {
+                      <tr>
+                        <td><span class="ip-badge">{{ visitor.ip_address }}</span></td>
+                        <td class="text-center"><strong>{{ visitor.visit_count }}</strong></td>
+                        <td class="text-xs">{{ visitor.first_visit | date:'medium' }}</td>
+                        <td class="text-xs">{{ visitor.last_visit | date:'medium' }}</td>
+                      </tr>
+                    } @empty {
+                      <tr><td colspan="4" class="empty-state text-center p-4">No hay visitantes para mostrar.</td></tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        }
+        @case ('mvps') {
+          <div class="admin-dashboard-wrapper">
+            <div class="admin-form-container">
+              <h2 class="admin-table-title">Agregar Nuevo MVP</h2>
+              
+              <div class="admin-form">
+                <div class="form-group">
+                  <label>Nombre del MVP</label>
+                  <input type="text" #mvpNameInput class="login-input" placeholder="Ej: Baphomet">
+                </div>
+                
+                <div class="form-group">
+                  <label>Tiempo Base (Minutos)</label>
+                  <input type="number" #mvpTimeInput class="login-input" placeholder="Ej: 120">
+                </div>
+                
+                <div class="form-group">
+                  <label>URL de la Imagen</label>
+                  <input type="text" #mvpImgInput class="login-input" placeholder="Ej: /baphomet.gif">
+                </div>
+                
+                <button class="btn btn-killed" style="margin-top: 1rem;" 
+                  (click)="addNewMvp(mvpNameInput.value, mvpTimeInput.value, mvpImgInput.value); mvpNameInput.value=''; mvpTimeInput.value=''; mvpImgInput.value=''">
+                  AGREGAR MVP
+                </button>
+              </div>
+            </div>
+          </div>
+        }
+      }
+    </main>
+  </div>
+  }
 
 </div>
 }
